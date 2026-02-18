@@ -1,3 +1,4 @@
+from sys import modules
 import numpy as np
 
 # ==========================================
@@ -17,10 +18,20 @@ from collections import deque
 # ==========================================
 # 1. 定义 Q 网络 (大脑)
 # ==========================================
-class QNetwork(nn.Module):
+class QNetwork(nn.Module): 
+    # ==========================================
+    # 继承自 nn.Module
+    # nn.Module 是 PyTorch 所有神经网络模型的基类
+    # 说明这是一个 神经网络模型
+    # ==========================================
     def __init__(self, state_dim, action_dim):
         super(QNetwork, self).__init__()
+        # 调用父类（nn.Module）的初始化函数，nn.Module 里面做了很多重要的初始化工作。
+        # 如果你不调用它：你的模型就不是一个“真正的 PyTorch 模型”。
+        # super() 的意思是：找到父类
+        # 等价于super().__init__()
         self.fc = nn.Sequential(
+            # nn.Sequential 代表按顺序把多个层串起来
             nn.Linear(state_dim, 128),
             nn.ReLU(),
             nn.Linear(128, 128),
@@ -28,37 +39,53 @@ class QNetwork(nn.Module):
             nn.Linear(128, action_dim)
         )
 
+    # ==========================================
+    # 前向传播
+    # 定义模型的前向传播逻辑：输入 x，经过全连接网络 self.fc，输出结果。
+    # ==========================================
     def forward(self, x):
         return self.fc(x)
 
+
 # ==========================================
 # 2. 定义 DQN 智能体
+# 负责三件事：
+# 1. 选动作
+# 2. 存经验
+# 3. 学习更新网络
 # ==========================================
 class DQNAgent:
     def __init__(self, state_dim, action_dim):
-        self.state_dim = state_dim
-        self.action_dim = action_dim
+        self.state_dim = state_dim #状态向量
+        self.action_dim = action_dim #动作空间
         
-        self.gamma = 0.99
-        self.epsilon = 1.0
-        self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
-        self.learning_rate = 0.001
-        self.batch_size = 64
-        self.target_update_freq = 10
+        self.gamma = 0.99 #折扣因子 Q=r+γQ(s',a') 表示未来奖励的重要程度。
+        self.epsilon = 1.0 #探索率
+        self.epsilon_min = 0.01 #最小探索率
+        self.epsilon_decay = 0.995 #探索率衰减
+        # ε-greedy 策略：探索率从1.0开始，随着训练进行逐渐衰减到0.01，确保初期充分探索，后期利用已有知识。
+        self.learning_rate = 0.001 #学习率
+        self.batch_size = 64 #每次训练采样64条经验
+        self.target_update_freq = 10 #目标网络更新频率，每隔10次迭代更新一次目标网络，保持目标网络稳定，避免震荡。
 
-        self.memory = deque(maxlen=10000) 
+        self.memory = deque(maxlen=10000) #经验回放
+        # 存储数据(state, action, reward, next_state, done)，最多10000条
 
-        self.q_net = QNetwork(state_dim, action_dim)
-        self.target_net = QNetwork(state_dim, action_dim)
-        self.target_net.load_state_dict(self.q_net.state_dict())
+        self.q_net = QNetwork(state_dim, action_dim) #当前训练的网络
+        self.target_net = QNetwork(state_dim, action_dim) #固定一段时间的“稳定目标网络”
+        # 核心是两个网络
+        self.target_net.load_state_dict(self.q_net.state_dict()) #一开始两个网络参数相同。
 
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=self.learning_rate)
         self.loss_func = nn.MSELoss()
+        # 优化器：Adam 优化器，用于更新 q_net 的参数。
+        # 损失函数：均方误差 (MSE)，用于衡量预测值与目标值之间的差距。loss=（Q_eval-Q_target）^2
         
         self.update_count = 0
 
     def select_action(self, state):
+        # 选动作 以epsilon的概率随机选，否则以1-epsilon的概率选Q值最大的动作
+        # 最开始的探索率最大
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_dim)
         else:
@@ -172,3 +199,4 @@ if __name__ == '__main__':
             break
             
     print("训练结束！")
+    torch.save(agent.q_net, "DQN_model.pth")
