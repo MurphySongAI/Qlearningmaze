@@ -100,12 +100,16 @@ class DQNAgent:
 
     def store_transition(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
+        # 往经验池中添加一条经验
 
     def learn(self):
         if len(self.memory) < self.batch_size:
             return
+        # 如果经验池中的经验少于batch_size，不进行学习，不训练，不更新网络
+        # 会先开始随机行动，收集经验，存入memory，等memory大于64的时候，再开始学习
 
         batch = random.sample(self.memory, self.batch_size)
+        # 从经验池中随机采样batch_size = 64条经验
         state, action, reward, next_state, done = zip(*batch)
         
         state = torch.FloatTensor(np.array(state))
@@ -120,19 +124,24 @@ class DQNAgent:
             q_next = self.target_net(next_state).max(1)[0].unsqueeze(1)
         
         q_target = reward + (1 - done) * self.gamma * q_next
+        # 贝尔曼方程 Q(s,a) = r + gamma * max Q(s',a')
 
         loss = self.loss_func(q_eval, q_target)
         
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+        # 反向传播，更新网络参数：清空梯度，计算梯度，更新参数
 
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
+            # 探索率衰减
             
         self.update_count += 1
         if self.update_count % self.target_update_freq == 0:
             self.target_net.load_state_dict(self.q_net.state_dict())
+
+        return loss.item()
 
 # ==========================================
 # 3. 主训练循环 (兼容修复版)
@@ -152,7 +161,14 @@ if __name__ == '__main__':
     
     EPISODES = 200
     
-    print("🚀 开始训练 DQN (已修复 numpy 和 reset 问题)...")
+    # Set up logging
+    log_f = open("dqn_training_log.txt", "w", encoding='utf-8')
+    def log(msg):
+        print(msg)
+        log_f.write(str(msg) + "\n") # Ensure msg is converted to string
+        log_f.flush()
+
+    log("🚀 开始训练 DQN (已修复 numpy 和 reset 问题)...")
     
     for episode in range(EPISODES):
         # --- 兼容性修复 1: reset 返回值 ---
@@ -164,6 +180,8 @@ if __name__ == '__main__':
             
         total_reward = 0
         done = False
+        step_count = 0
+        log(f"\n=== Episode {episode} Start ===")
         
         while not done:
             action = agent.select_action(state)
@@ -185,18 +203,37 @@ if __name__ == '__main__':
             if done and total_reward < 499:
                 reward_to_store = -10
             
+            # --- 记录日志 ---
+            # 1. 获取当前状态的 Q 值 (仅用于展示)
+            state_tensor = torch.FloatTensor(state)
+            if state_tensor.dim() == 1:
+                state_tensor = state_tensor.unsqueeze(0)
+            
+            with torch.no_grad():
+                q_values_log = agent.q_net(state_tensor).detach().numpy().flatten()
+                q_values_str = "[" + ", ".join([f"{q:.3f}" for q in q_values_log]) + "]"
+
+            # 2. 执行学习并获取 Loss
             agent.store_transition(state, action, reward_to_store, next_state, done)
-            agent.learn()
+            loss = agent.learn()
+            
+            # 3. 打印详细日志
+            loss_str = f"{loss:.5f}" if loss is not None else "N/A"
+            log(f"Step: {step_count:3d} | State: {np.round(state, 2)} | Q-values: {q_values_str} | "
+                  f"Action: {action} | Reward: {reward:.1f} | Loss: {loss_str} | Epsilon: {agent.epsilon:.3f}")
             
             state = next_state
             total_reward += reward
+            step_count += 1
             
             if done:
-                print(f"Episode: {episode}, Score: {int(total_reward)}, Epsilon: {agent.epsilon:.2f}")
+                log(f"Episode: {episode}, Score: {int(total_reward)}, Epsilon: {agent.epsilon:.2f}")
+                log("-" * 100)
                 
         if total_reward >= 500:
-            print(f"✅ 在第 {episode} 局解决了问题！")
+            log(f"✅ 在第 {episode} 局解决了问题！")
             break
             
-    print("训练结束！")
+    log("训练结束！")
+    log_f.close()
     torch.save(agent.q_net, "DQN_model.pth")
